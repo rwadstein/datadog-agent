@@ -15,11 +15,19 @@ const (
 
 	// This is a special metric, it's 1 if the span is top-level, 0 if not.
 	topLevelKey = "_top_level"
+
+	// This is a special meta tag that marks a span for metrics calculation.
+	measuredKey = "_dd.measured"
 )
 
 // HasTopLevel returns true if span is top-level.
 func HasTopLevel(s *pb.Span) bool {
 	return s.Metrics[topLevelKey] == 1
+}
+
+// IsMeasured returns true if a span is marked for measurement.
+func IsMeasured(s *pb.Span) bool {
+	return s.Meta[measuredKey] == "1"
 }
 
 // HasForceMetrics returns true if statistics computation should be forced for this span.
