@@ -17,7 +17,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var testBucketInterval = time.Duration(2 * time.Second).Nanoseconds()
+var (
+	testBucketInterval = time.Duration(2 * time.Second).Nanoseconds()
+	measuredSpanMeta   = map[string]string{"_dd.measured": "1"}
+)
 
 func NewTestConcentrator() *Concentrator {
 	statsChan := make(chan []Bucket)
@@ -65,6 +68,9 @@ func TestConcentratorOldestTs(t *testing.T) {
 		testSpan(1, 0, 20, 2, "query", "A1", "resource1", 0, nil),
 		testSpan(1, 0, 10, 1, "query", "A1", "resource1", 0, nil),
 		testSpan(1, 0, 1, 0, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 500, 0, "custom_query", "A1", "resource1", 0, measuredSpanMeta),
+		testSpan(1, 0, 1000, 0, "custom_query", "A1", "resource1", 0, measuredSpanMeta),
+		testSpan(1, 0, 1500, 0, "custom_query", "A1", "resource1", 1, measuredSpanMeta),
 	}
 
 	traceutil.ComputeTopLevel(trace)
@@ -95,13 +101,28 @@ func TestConcentratorOldestTs(t *testing.T) {
 			t.FailNow()
 		}
 
-		// First oldest bucket aggregates old past time buckets, it should have it all.
+		// First oldest bucket aggregates old past time buckets, so each count
+		// should be an aggregated total across the spans.
+		// We should expect (3 metrics) * (2 unique span names) = 6 unique keys.
+		assert.Equal(6, len(stats[0].Counts))
 		for key, count := range stats[0].Counts {
 			if key == "query|duration|env:none,resource:resource1,service:A1" {
 				assert.Equal(151, int(count.Value), "Wrong value for duration")
 			}
 			if key == "query|hits|env:none,resource:resource1,service:A1" {
 				assert.Equal(6, int(count.Value), "Wrong value for hits")
+			}
+			if key == "query|errors|env:none,resource:resource1,service:A1" {
+				assert.Equal(0, int(count.Value), "Wrong value for hits")
+			}
+			if key == "custom_query_op|hits|env:none,resource:resource1,service:A1" {
+				assert.Equal(3, int(count.Value), "Wrong value for hits on measured span")
+			}
+			if key == "custom_query_op|errors|env:none,resource:resource1,service:A1" {
+				assert.Equal(1, int(count.Value), "Wrong value for errors on measured span")
+			}
+			if key == "custom_query_op|duration|env:none,resource:resource1,service:A1" {
+				assert.Equal(3000, int(count.Value), "Wrong value for duration on measured span")
 			}
 		}
 	})
@@ -126,13 +147,20 @@ func TestConcentratorOldestTs(t *testing.T) {
 		}
 		flushTime += testBucketInterval
 
-		// First oldest bucket aggregates, it should have it all except the last span.
+		// First oldest bucket aggregates, it should have it all except the
+		// last four spans that have offset of 0.
+		// We have only one unique span name in this bucket.
+		// We should expect (3 metrics) * (1 unique span names) = 3 unique keys.
+		assert.Equal(3, len(stats[0].Counts))
 		for key, count := range stats[0].Counts {
 			if key == "query|duration|env:none,resource:resource1,service:A1" {
 				assert.Equal(150, int(count.Value), "Wrong value for duration")
 			}
 			if key == "query|hits|env:none,resource:resource1,service:A1" {
 				assert.Equal(5, int(count.Value), "Wrong value for hits")
+			}
+			if key == "query|errors|env:none,resource:resource1,service:A1" {
+				assert.Equal(0, int(count.Value), "Wrong value for hits")
 			}
 		}
 
@@ -141,13 +169,27 @@ func TestConcentratorOldestTs(t *testing.T) {
 			t.FailNow()
 		}
 
-		// Stats of the last span.
+		// Stats of the last four spans.
+		// We should expect (3 metrics) * (2 unique span names) = 3 unique keys.
+		assert.Equal(6, len(stats[0].Counts))
 		for key, count := range stats[0].Counts {
 			if key == "query|duration|env:none,resource:resource1,service:A1" {
 				assert.Equal(1, int(count.Value), "Wrong value for duration")
 			}
 			if key == "query|hits|env:none,resource:resource1,service:A1" {
 				assert.Equal(1, int(count.Value), "Wrong value for hits")
+			}
+			if key == "query|errors|env:none,resource:resource1,service:A1" {
+				assert.Equal(0, int(count.Value), "Wrong value for duration")
+			}
+			if key == "custom_query_op|hits|env:none,resource:resource1,service:A1" {
+				assert.Equal(3, int(count.Value), "Wrong value for hits on measured span")
+			}
+			if key == "custom_query_op|errors|env:none,resource:resource1,service:A1" {
+				assert.Equal(1, int(count.Value), "Wrong value for errors on measured span")
+			}
+			if key == "custom_query_op|duration|env:none,resource:resource1,service:A1" {
+				assert.Equal(3000, int(count.Value), "Wrong value for duration on measured span")
 			}
 		}
 	})

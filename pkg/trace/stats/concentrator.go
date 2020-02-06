@@ -132,7 +132,7 @@ func (c *Concentrator) addNow(i *Input, now int64) {
 	c.mu.Lock()
 
 	for _, s := range i.Trace {
-		if !s.TopLevel || !s.Measured {
+		if !(s.TopLevel || s.Measured) {
 			continue
 		}
 		end := s.Start + s.Duration
