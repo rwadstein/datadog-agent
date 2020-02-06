@@ -31,7 +31,7 @@ func getTsInBucket(alignedNow int64, bsize int64, offset int64) int64 {
 
 // testSpan avoids typo and inconsistency in test spans (typical pitfall: duration, start time,
 // and end time are aligned, and end time is the one that needs to be aligned
-func testSpan(spanID uint64, parentID uint64, duration, offset int64, service, resource string, err int32) *pb.Span {
+func testSpan(spanID uint64, parentID uint64, duration, offset int64, name, service, resource string, err int32, meta map[string]string) *pb.Span {
 	now := time.Now().UnixNano()
 	alignedNow := now - now%testBucketInterval
 
@@ -41,10 +41,11 @@ func testSpan(spanID uint64, parentID uint64, duration, offset int64, service, r
 		Duration: duration,
 		Start:    getTsInBucket(alignedNow, testBucketInterval, offset) - duration,
 		Service:  service,
-		Name:     "query",
+		Name:     name,
 		Resource: resource,
 		Error:    err,
 		Type:     "db",
+		Meta:     meta,
 	}
 }
 
@@ -58,12 +59,12 @@ func TestConcentratorOldestTs(t *testing.T) {
 
 	// Build that simply have spans spread over time windows.
 	trace := pb.Trace{
-		testSpan(1, 0, 50, 5, "A1", "resource1", 0),
-		testSpan(1, 0, 40, 4, "A1", "resource1", 0),
-		testSpan(1, 0, 30, 3, "A1", "resource1", 0),
-		testSpan(1, 0, 20, 2, "A1", "resource1", 0),
-		testSpan(1, 0, 10, 1, "A1", "resource1", 0),
-		testSpan(1, 0, 1, 0, "A1", "resource1", 0),
+		testSpan(1, 0, 50, 5, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 40, 4, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 30, 3, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 20, 2, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 10, 1, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 1, 0, "query", "A1", "resource1", 0, nil),
 	}
 
 	traceutil.ComputeTopLevel(trace)
@@ -168,12 +169,12 @@ func TestConcentratorStatsTotals(t *testing.T) {
 
 	// Build that simply have spans spread over time windows.
 	trace := pb.Trace{
-		testSpan(1, 0, 50, 5, "A1", "resource1", 0),
-		testSpan(1, 0, 40, 4, "A1", "resource1", 0),
-		testSpan(1, 0, 30, 3, "A1", "resource1", 0),
-		testSpan(1, 0, 20, 2, "A1", "resource1", 0),
-		testSpan(1, 0, 10, 1, "A1", "resource1", 0),
-		testSpan(1, 0, 1, 0, "A1", "resource1", 0),
+		testSpan(1, 0, 50, 5, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 40, 4, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 30, 3, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 20, 2, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 10, 1, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 1, 0, "query", "A1", "resource1", 0, nil),
 	}
 
 	traceutil.ComputeTopLevel(trace)
@@ -227,22 +228,22 @@ func TestConcentratorStatsCounts(t *testing.T) {
 	// Build a trace with stats which should cover 3 time buckets.
 	trace := pb.Trace{
 		// more than 2 buckets old, should be added to the 2 bucket-old, first flush.
-		testSpan(1, 0, 111, 10, "A1", "resource1", 0),
-		testSpan(1, 0, 222, 3, "A1", "resource1", 0),
+		testSpan(1, 0, 111, 10, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 222, 3, "query", "A1", "resource1", 0, nil),
 		// 2 buckets old, part of the first flush
-		testSpan(1, 0, 24, 2, "A1", "resource1", 0),
-		testSpan(2, 0, 12, 2, "A1", "resource1", 2),
-		testSpan(3, 0, 40, 2, "A2", "resource2", 2),
-		testSpan(4, 0, 300000000000, 2, "A2", "resource2", 2), // 5 minutes trace
-		testSpan(5, 0, 30, 2, "A2", "resourcefoo", 0),
+		testSpan(1, 0, 24, 2, "query", "A1", "resource1", 0, nil),
+		testSpan(2, 0, 12, 2, "query", "A1", "resource1", 2, nil),
+		testSpan(3, 0, 40, 2, "query", "A2", "resource2", 2, nil),
+		testSpan(4, 0, 300000000000, 2, "query", "A2", "resource2", 2, nil), // 5 minutes trace
+		testSpan(5, 0, 30, 2, "query", "A2", "resourcefoo", 0, nil),
 		// 1 bucket old, part of the second flush
-		testSpan(6, 0, 24, 1, "A1", "resource2", 0),
-		testSpan(7, 0, 12, 1, "A1", "resource1", 2),
-		testSpan(8, 0, 40, 1, "A2", "resource1", 2),
-		testSpan(9, 0, 30, 1, "A2", "resource2", 2),
-		testSpan(10, 0, 3600000000000, 1, "A2", "resourcefoo", 0), // 1 hour trace
+		testSpan(6, 0, 24, 1, "query", "A1", "resource2", 0, nil),
+		testSpan(7, 0, 12, 1, "query", "A1", "resource1", 2, nil),
+		testSpan(8, 0, 40, 1, "query", "A2", "resource1", 2, nil),
+		testSpan(9, 0, 30, 1, "query", "A2", "resource2", 2, nil),
+		testSpan(10, 0, 3600000000000, 1, "query", "A2", "resourcefoo", 0, nil), // 1 hour trace
 		// present data, part of the third flush
-		testSpan(6, 0, 24, 0, "A1", "resource2", 0),
+		testSpan(6, 0, 24, 0, "query", "A1", "resource2", 0, nil),
 	}
 
 	expectedCountValByKeyByTime := make(map[int64]map[string]int64)
@@ -345,12 +346,12 @@ func TestConcentratorSublayersStatsCounts(t *testing.T) {
 
 	trace := pb.Trace{
 		// first bucket
-		testSpan(1, 0, 2000, 0, "A1", "resource1", 0),
-		testSpan(2, 1, 1000, 0, "A2", "resource2", 0),
-		testSpan(3, 1, 1000, 0, "A2", "resource3", 0),
-		testSpan(4, 2, 40, 0, "A3", "resource4", 0),
-		testSpan(5, 4, 300, 0, "A3", "resource5", 0),
-		testSpan(6, 2, 30, 0, "A3", "resource6", 0),
+		testSpan(1, 0, 2000, 0, "query", "A1", "resource1", 0, nil),
+		testSpan(2, 1, 1000, 0, "query", "A2", "resource2", 0, nil),
+		testSpan(3, 1, 1000, 0, "query", "A2", "resource3", 0, nil),
+		testSpan(4, 2, 40, 0, "query", "A3", "resource4", 0, nil),
+		testSpan(5, 4, 300, 0, "query", "A3", "resource5", 0, nil),
+		testSpan(6, 2, 30, 0, "query", "A3", "resource6", 0, nil),
 	}
 	traceutil.ComputeTopLevel(trace)
 	wt := NewWeightedTrace(trace, traceutil.GetRoot(trace))
