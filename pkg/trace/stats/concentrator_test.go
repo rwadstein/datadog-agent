@@ -8,6 +8,7 @@ package stats
 import (
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +53,16 @@ func testSpan(spanID uint64, parentID uint64, duration, offset int64, name, serv
 	}
 }
 
+// countsEq is a test utility function to assert expected == actual for count aggregations.
+func countsEq(assert *assert.Assertions, expected map[string]float64, actual map[string]Count) {
+	assert.Equal(len(expected), len(actual))
+	for key, val := range expected {
+		count, ok := actual[key]
+		assert.True(ok, "Missing expected key from actual counts: %s", key)
+		assert.Equal(val, count.Value)
+	}
+}
+
 // TestConcentratorOldestTs tests that the Agent doesn't report time buckets from a
 // time before its start
 func TestConcentratorOldestTs(t *testing.T) {
@@ -68,9 +79,9 @@ func TestConcentratorOldestTs(t *testing.T) {
 		testSpan(1, 0, 20, 2, "query", "A1", "resource1", 0, nil),
 		testSpan(1, 0, 10, 1, "query", "A1", "resource1", 0, nil),
 		testSpan(1, 0, 1, 0, "query", "A1", "resource1", 0, nil),
-		testSpan(1, 0, 500, 0, "custom_query", "A1", "resource1", 0, measuredSpanMeta),
-		testSpan(1, 0, 1000, 0, "custom_query", "A1", "resource1", 0, measuredSpanMeta),
-		testSpan(1, 0, 1500, 0, "custom_query", "A1", "resource1", 1, measuredSpanMeta),
+		testSpan(1, 0, 500, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
+		testSpan(1, 0, 1000, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
+		testSpan(1, 0, 1500, 0, "custom_query_op", "A1", "resource1", 1, measuredSpanMeta),
 	}
 
 	traceutil.ComputeTopLevel(trace)
@@ -103,28 +114,15 @@ func TestConcentratorOldestTs(t *testing.T) {
 
 		// First oldest bucket aggregates old past time buckets, so each count
 		// should be an aggregated total across the spans.
-		// We should expect (3 metrics) * (2 unique span names) = 6 unique keys.
-		assert.Equal(6, len(stats[0].Counts))
-		for key, count := range stats[0].Counts {
-			if key == "query|duration|env:none,resource:resource1,service:A1" {
-				assert.Equal(151, int(count.Value), "Wrong value for duration")
-			}
-			if key == "query|hits|env:none,resource:resource1,service:A1" {
-				assert.Equal(6, int(count.Value), "Wrong value for hits")
-			}
-			if key == "query|errors|env:none,resource:resource1,service:A1" {
-				assert.Equal(0, int(count.Value), "Wrong value for hits")
-			}
-			if key == "custom_query_op|hits|env:none,resource:resource1,service:A1" {
-				assert.Equal(3, int(count.Value), "Wrong value for hits on measured span")
-			}
-			if key == "custom_query_op|errors|env:none,resource:resource1,service:A1" {
-				assert.Equal(1, int(count.Value), "Wrong value for errors on measured span")
-			}
-			if key == "custom_query_op|duration|env:none,resource:resource1,service:A1" {
-				assert.Equal(3000, int(count.Value), "Wrong value for duration on measured span")
-			}
+		expected := map[string]float64{
+			"query|duration|env:none,resource:resource1,service:A1":           151,
+			"query|hits|env:none,resource:resource1,service:A1":               6,
+			"query|errors|env:none,resource:resource1,service:A1":             0,
+			"custom_query_op|duration|env:none,resource:resource1,service:A1": 3000,
+			"custom_query_op|hits|env:none,resource:resource1,service:A1":     3,
+			"custom_query_op|errors|env:none,resource:resource1,service:A1":   1,
 		}
+		countsEq(assert, expected, stats[0].Counts)
 	})
 
 	t.Run("hot", func(t *testing.T) {
@@ -149,20 +147,12 @@ func TestConcentratorOldestTs(t *testing.T) {
 
 		// First oldest bucket aggregates, it should have it all except the
 		// last four spans that have offset of 0.
-		// We have only one unique span name in this bucket.
-		// We should expect (3 metrics) * (1 unique span names) = 3 unique keys.
-		assert.Equal(3, len(stats[0].Counts))
-		for key, count := range stats[0].Counts {
-			if key == "query|duration|env:none,resource:resource1,service:A1" {
-				assert.Equal(150, int(count.Value), "Wrong value for duration")
-			}
-			if key == "query|hits|env:none,resource:resource1,service:A1" {
-				assert.Equal(5, int(count.Value), "Wrong value for hits")
-			}
-			if key == "query|errors|env:none,resource:resource1,service:A1" {
-				assert.Equal(0, int(count.Value), "Wrong value for hits")
-			}
+		expected := map[string]float64{
+			"query|duration|env:none,resource:resource1,service:A1": 150,
+			"query|hits|env:none,resource:resource1,service:A1":     5,
+			"query|errors|env:none,resource:resource1,service:A1":   0,
 		}
+		countsEq(assert, expected, stats[0].Counts)
 
 		stats = c.flushNow(flushTime)
 		if !assert.Equal(1, len(stats), "We should get exactly 1 Bucket") {
@@ -170,28 +160,15 @@ func TestConcentratorOldestTs(t *testing.T) {
 		}
 
 		// Stats of the last four spans.
-		// We should expect (3 metrics) * (2 unique span names) = 3 unique keys.
-		assert.Equal(6, len(stats[0].Counts))
-		for key, count := range stats[0].Counts {
-			if key == "query|duration|env:none,resource:resource1,service:A1" {
-				assert.Equal(1, int(count.Value), "Wrong value for duration")
-			}
-			if key == "query|hits|env:none,resource:resource1,service:A1" {
-				assert.Equal(1, int(count.Value), "Wrong value for hits")
-			}
-			if key == "query|errors|env:none,resource:resource1,service:A1" {
-				assert.Equal(0, int(count.Value), "Wrong value for duration")
-			}
-			if key == "custom_query_op|hits|env:none,resource:resource1,service:A1" {
-				assert.Equal(3, int(count.Value), "Wrong value for hits on measured span")
-			}
-			if key == "custom_query_op|errors|env:none,resource:resource1,service:A1" {
-				assert.Equal(1, int(count.Value), "Wrong value for errors on measured span")
-			}
-			if key == "custom_query_op|duration|env:none,resource:resource1,service:A1" {
-				assert.Equal(3000, int(count.Value), "Wrong value for duration on measured span")
-			}
+		expected = map[string]float64{
+			"query|duration|env:none,resource:resource1,service:A1":           1,
+			"query|hits|env:none,resource:resource1,service:A1":               1,
+			"query|errors|env:none,resource:resource1,service:A1":             0,
+			"custom_query_op|duration|env:none,resource:resource1,service:A1": 3000,
+			"custom_query_op|hits|env:none,resource:resource1,service:A1":     3,
+			"custom_query_op|errors|env:none,resource:resource1,service:A1":   1,
 		}
+		countsEq(assert, expected, stats[0].Counts)
 	})
 }
 
@@ -217,6 +194,9 @@ func TestConcentratorStatsTotals(t *testing.T) {
 		testSpan(1, 0, 20, 2, "query", "A1", "resource1", 0, nil),
 		testSpan(1, 0, 10, 1, "query", "A1", "resource1", 0, nil),
 		testSpan(1, 0, 1, 0, "query", "A1", "resource1", 0, nil),
+		testSpan(1, 0, 10, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
+		testSpan(1, 0, 10, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
+		testSpan(1, 0, 100, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
 	}
 
 	traceutil.ComputeTopLevel(trace)
@@ -228,8 +208,9 @@ func TestConcentratorStatsTotals(t *testing.T) {
 	}
 	c.addNow(testTrace, time.Now().UnixNano())
 
-	var hits float64
 	var duration float64
+	var hits float64
+	var errors float64
 
 	flushTime := now
 	for i := 0; i <= c.bufferLen; i++ {
@@ -240,18 +221,22 @@ func TestConcentratorStatsTotals(t *testing.T) {
 		}
 
 		for key, count := range stats[0].Counts {
-			if key == "query|duration|env:none,resource:resource1,service:A1" {
+			if strings.HasPrefix(key, "query|duration") || strings.HasPrefix(key, "custom_query_op|duration") {
 				duration += count.Value
 			}
-			if key == "query|hits|env:none,resource:resource1,service:A1" {
+			if strings.HasPrefix(key, "query|hits") || strings.HasPrefix(key, "custom_query_op|hits") {
 				hits += count.Value
+			}
+			if strings.HasPrefix(key, "query|errors") || strings.HasPrefix(key, "custom_query_op|errors") {
+				errors += count.Value
 			}
 		}
 		flushTime += c.bsize
 	}
 
+	assert.Equal(duration, float64(50+40+30+20+10+1+10+10+100), "Wrong value for total duration %d", duration)
 	assert.Equal(hits, float64(len(trace)), "Wrong value for total hits %d", hits)
-	assert.Equal(duration, float64(50+40+30+20+10+1), "Wrong value for total duration %d", duration)
+	assert.Equal(errors, float64(0), "Wrong value for total errors %d", errors)
 }
 
 // TestConcentratorStatsCounts tests exhaustively each stats bucket, over multiple time buckets.
@@ -286,10 +271,11 @@ func TestConcentratorStatsCounts(t *testing.T) {
 		testSpan(10, 0, 3600000000000, 1, "query", "A2", "resourcefoo", 0, nil), // 1 hour trace
 		// present data, part of the third flush
 		testSpan(6, 0, 24, 0, "query", "A1", "resource2", 0, nil),
+		testSpan(20, 0, 24, 0, "query", "A1", "resource2", 0, measuredSpanMeta),
 	}
 
-	expectedCountValByKeyByTime := make(map[int64]map[string]int64)
-	expectedCountValByKeyByTime[alignedNow-2*testBucketInterval] = map[string]int64{
+	expectedCountValByKeyByTime := make(map[int64]map[string]float64)
+	expectedCountValByKeyByTime[alignedNow-2*testBucketInterval] = map[string]float64{
 		"query|duration|env:none,resource:resource1,service:A1":   369,
 		"query|duration|env:none,resource:resource2,service:A2":   300000000040,
 		"query|duration|env:none,resource:resourcefoo,service:A2": 30,
@@ -300,7 +286,7 @@ func TestConcentratorStatsCounts(t *testing.T) {
 		"query|hits|env:none,resource:resource2,service:A2":       2,
 		"query|hits|env:none,resource:resourcefoo,service:A2":     1,
 	}
-	expectedCountValByKeyByTime[alignedNow-1*testBucketInterval] = map[string]int64{
+	expectedCountValByKeyByTime[alignedNow-1*testBucketInterval] = map[string]float64{
 		"query|duration|env:none,resource:resource1,service:A1":   12,
 		"query|duration|env:none,resource:resource2,service:A1":   24,
 		"query|duration|env:none,resource:resource1,service:A2":   40,
@@ -317,12 +303,12 @@ func TestConcentratorStatsCounts(t *testing.T) {
 		"query|hits|env:none,resource:resource2,service:A2":       1,
 		"query|hits|env:none,resource:resourcefoo,service:A2":     1,
 	}
-	expectedCountValByKeyByTime[alignedNow] = map[string]int64{
+	expectedCountValByKeyByTime[alignedNow] = map[string]float64{
 		"query|duration|env:none,resource:resource2,service:A1": 24,
 		"query|errors|env:none,resource:resource2,service:A1":   0,
 		"query|hits|env:none,resource:resource2,service:A1":     1,
 	}
-	expectedCountValByKeyByTime[alignedNow+testBucketInterval] = map[string]int64{}
+	expectedCountValByKeyByTime[alignedNow+testBucketInterval] = map[string]float64{}
 
 	traceutil.ComputeTopLevel(trace)
 	wt := NewWeightedTrace(trace, traceutil.GetRoot(trace))
@@ -356,14 +342,7 @@ func TestConcentratorStatsCounts(t *testing.T) {
 			expectedCountValByKey := expectedCountValByKeyByTime[expectedFlushedTs]
 			receivedCounts := receivedBuckets[0].Counts
 
-			// verify we got all counts
-			assert.Equal(len(expectedCountValByKey), len(receivedCounts), "GOT %v", receivedCounts)
-			// verify values
-			for key, val := range expectedCountValByKey {
-				count, ok := receivedCounts[key]
-				assert.True(ok, "%s was expected from concentrator", key)
-				assert.Equal(val, int64(count.Value), "Wrong value for count %s", key)
-			}
+			countsEq(assert, expectedCountValByKey, receivedCounts)
 
 			// Flushing again at the same time should return nothing
 			stats = c.flushNow(flushTime)
@@ -424,7 +403,7 @@ func TestConcentratorSublayersStatsCounts(t *testing.T) {
 
 	// Start with the first/older bucket
 	receivedCounts = stats[0].Counts
-	expectedCountValByKey := map[string]int64{
+	expectedCountValByKey := map[string]float64{
 		"query|_sublayers.duration.by_service|env:none,resource:resource1,service:A1,sublayer_service:A1": 2000,
 		"query|_sublayers.duration.by_service|env:none,resource:resource1,service:A1,sublayer_service:A2": 2000,
 		"query|_sublayers.duration.by_service|env:none,resource:resource1,service:A1,sublayer_service:A3": 370,
@@ -454,12 +433,5 @@ func TestConcentratorSublayersStatsCounts(t *testing.T) {
 		"query|hits|env:none,resource:resource6,service:A3":                                               1,
 	}
 
-	// verify we got all counts
-	assert.Equal(len(expectedCountValByKey), len(receivedCounts), "GOT %v", receivedCounts)
-	// verify values
-	for key, val := range expectedCountValByKey {
-		count, ok := receivedCounts[key]
-		assert.True(ok, "%s was expected from concentrator", key)
-		assert.Equal(val, int64(count.Value), "Wrong value for count %s", key)
-	}
+	countsEq(assert, expectedCountValByKey, receivedCounts)
 }
