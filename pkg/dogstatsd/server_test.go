@@ -447,7 +447,7 @@ func TestNoMappingsConfig(t *testing.T) {
 
 	assert.Nil(t, s.mapper)
 
-	_, err = s.parseMetricMessage([]byte("test.metric:666|g"))
+	_, err = s.parseMetricMessage([]byte("test.metric:666|g"), "")
 	assert.NoError(t, err)
 }
 
@@ -558,7 +558,7 @@ dogstatsd_mapper_profiles:
 
 			var actualSamples []MetricSample
 			for _, p := range scenario.packets {
-				sample, err := s.parseMetricMessage([]byte(p))
+				sample, err := s.parseMetricMessage([]byte(p), "")
 				assert.NoError(t, err)
 				actualSamples = append(actualSamples, MetricSample{Name: sample.Name, Tags: sample.Tags, Mtype: sample.Mtype, Value: sample.Value})
 			}
