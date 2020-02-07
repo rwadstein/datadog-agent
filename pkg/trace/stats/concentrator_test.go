@@ -279,42 +279,52 @@ func TestConcentratorStatsCounts(t *testing.T) {
 		testSpan(10, 0, 3600000000000, 1, "query", "A2", "resourcefoo", 0, nil), // 1 hour trace
 		// present data, part of the third flush
 		testSpan(6, 0, 24, 0, "query", "A1", "resource2", 0, nil),
-		testSpan(20, 0, 24, 0, "query", "A1", "resource2", 0, measuredSpanMeta),
+		testSpan(20, 0, 10, 0, "custom_query_op", "A1", "resource2", 0, measuredSpanMeta),
+		testSpan(21, 20, 500, 0, "nested_op", "A1", "resource2", 1, measuredSpanMeta), // error in span
 	}
 
 	expectedCountValByKeyByTime := make(map[int64]map[string]float64)
+	// 2-bucket old flush
 	expectedCountValByKeyByTime[alignedNow-2*testBucketInterval] = map[string]float64{
 		"query|duration|env:none,resource:resource1,service:A1":   369,
 		"query|duration|env:none,resource:resource2,service:A2":   300000000040,
 		"query|duration|env:none,resource:resourcefoo,service:A2": 30,
-		"query|errors|env:none,resource:resource1,service:A1":     1,
-		"query|errors|env:none,resource:resource2,service:A2":     2,
-		"query|errors|env:none,resource:resourcefoo,service:A2":   0,
 		"query|hits|env:none,resource:resource1,service:A1":       4,
 		"query|hits|env:none,resource:resource2,service:A2":       2,
 		"query|hits|env:none,resource:resourcefoo,service:A2":     1,
+		"query|errors|env:none,resource:resource1,service:A1":     1,
+		"query|errors|env:none,resource:resource2,service:A2":     2,
+		"query|errors|env:none,resource:resourcefoo,service:A2":   0,
 	}
+	// 1-bucket old flush
 	expectedCountValByKeyByTime[alignedNow-1*testBucketInterval] = map[string]float64{
 		"query|duration|env:none,resource:resource1,service:A1":   12,
 		"query|duration|env:none,resource:resource2,service:A1":   24,
 		"query|duration|env:none,resource:resource1,service:A2":   40,
 		"query|duration|env:none,resource:resource2,service:A2":   30,
 		"query|duration|env:none,resource:resourcefoo,service:A2": 3600000000000,
-		"query|errors|env:none,resource:resource1,service:A1":     1,
-		"query|errors|env:none,resource:resource2,service:A1":     0,
-		"query|errors|env:none,resource:resource1,service:A2":     1,
-		"query|errors|env:none,resource:resource2,service:A2":     1,
-		"query|errors|env:none,resource:resourcefoo,service:A2":   0,
 		"query|hits|env:none,resource:resource1,service:A1":       1,
 		"query|hits|env:none,resource:resource2,service:A1":       1,
 		"query|hits|env:none,resource:resource1,service:A2":       1,
 		"query|hits|env:none,resource:resource2,service:A2":       1,
 		"query|hits|env:none,resource:resourcefoo,service:A2":     1,
+		"query|errors|env:none,resource:resource1,service:A1":     1,
+		"query|errors|env:none,resource:resource2,service:A1":     0,
+		"query|errors|env:none,resource:resource1,service:A2":     1,
+		"query|errors|env:none,resource:resource2,service:A2":     1,
+		"query|errors|env:none,resource:resourcefoo,service:A2":   0,
 	}
+	// last bucket to be flushed
 	expectedCountValByKeyByTime[alignedNow] = map[string]float64{
-		"query|duration|env:none,resource:resource2,service:A1": 24,
-		"query|errors|env:none,resource:resource2,service:A1":   0,
-		"query|hits|env:none,resource:resource2,service:A1":     1,
+		"query|duration|env:none,resource:resource2,service:A1":           24,
+		"query|hits|env:none,resource:resource2,service:A1":               1,
+		"query|errors|env:none,resource:resource2,service:A1":             0,
+		"custom_query_op|duration|env:none,resource:resource2,service:A1": 10,
+		"custom_query_op|hits|env:none,resource:resource2,service:A1":     1,
+		"custom_query_op|errors|env:none,resource:resource2,service:A1":   0,
+		"nested_op|duration|env:none,resource:resource2,service:A1":       500,
+		"nested_op|hits|env:none,resource:resource2,service:A1":           1,
+		"nested_op|errors|env:none,resource:resource2,service:A1":         1,
 	}
 	expectedCountValByKeyByTime[alignedNow+testBucketInterval] = map[string]float64{}
 
@@ -381,6 +391,9 @@ func TestConcentratorSublayersStatsCounts(t *testing.T) {
 		testSpan(4, 2, 40, 0, "query", "A3", "resource4", 0, nil),
 		testSpan(5, 4, 300, 0, "query", "A3", "resource5", 0, nil),
 		testSpan(6, 2, 30, 0, "query", "A3", "resource6", 0, nil),
+		// add a measured span as a child of the first span
+		// this will add to the sublayer metrics for service:A1, resource:resource1, type:db
+		testSpan(10, 1, 200, 2020, "nested_op", "A1", "resource1", 0, measuredSpanMeta),
 	}
 	traceutil.ComputeTopLevel(trace)
 	wt := NewWeightedTrace(trace, traceutil.GetRoot(trace))
@@ -412,16 +425,16 @@ func TestConcentratorSublayersStatsCounts(t *testing.T) {
 	// Start with the first/older bucket
 	receivedCounts = stats[0].Counts
 	expectedCountValByKey := map[string]float64{
-		"query|_sublayers.duration.by_service|env:none,resource:resource1,service:A1,sublayer_service:A1": 2000,
+		"query|_sublayers.duration.by_service|env:none,resource:resource1,service:A1,sublayer_service:A1": 2200,
 		"query|_sublayers.duration.by_service|env:none,resource:resource1,service:A1,sublayer_service:A2": 2000,
 		"query|_sublayers.duration.by_service|env:none,resource:resource1,service:A1,sublayer_service:A3": 370,
 		"query|_sublayers.duration.by_service|env:none,resource:resource4,service:A3,sublayer_service:A3": 340,
 		"query|_sublayers.duration.by_service|env:none,resource:resource2,service:A2,sublayer_service:A2": 1000,
 		"query|_sublayers.duration.by_service|env:none,resource:resource2,service:A2,sublayer_service:A3": 370,
-		"query|_sublayers.duration.by_type|env:none,resource:resource1,service:A1,sublayer_type:db":       4370,
+		"query|_sublayers.duration.by_type|env:none,resource:resource1,service:A1,sublayer_type:db":       4570,
 		"query|_sublayers.duration.by_type|env:none,resource:resource2,service:A2,sublayer_type:db":       1370,
 		"query|_sublayers.duration.by_type|env:none,resource:resource4,service:A3,sublayer_type:db":       340,
-		"query|_sublayers.span_count|env:none,resource:resource1,service:A1,:":                            6,
+		"query|_sublayers.span_count|env:none,resource:resource1,service:A1,:":                            7,
 		"query|_sublayers.span_count|env:none,resource:resource2,service:A2,:":                            4,
 		"query|_sublayers.span_count|env:none,resource:resource4,service:A3,:":                            2,
 		"query|duration|env:none,resource:resource1,service:A1":                                           2000,
@@ -429,17 +442,19 @@ func TestConcentratorSublayersStatsCounts(t *testing.T) {
 		"query|duration|env:none,resource:resource3,service:A2":                                           1000,
 		"query|duration|env:none,resource:resource4,service:A3":                                           40,
 		"query|duration|env:none,resource:resource6,service:A3":                                           30,
-		"query|errors|env:none,resource:resource1,service:A1":                                             0,
-		"query|errors|env:none,resource:resource2,service:A2":                                             0,
-		"query|errors|env:none,resource:resource3,service:A2":                                             0,
-		"query|errors|env:none,resource:resource4,service:A3":                                             0,
-		"query|errors|env:none,resource:resource6,service:A3":                                             0,
+		"nested_op|duration|env:none,resource:resource1,service:A1":                                       200,
 		"query|hits|env:none,resource:resource1,service:A1":                                               1,
 		"query|hits|env:none,resource:resource2,service:A2":                                               1,
 		"query|hits|env:none,resource:resource3,service:A2":                                               1,
 		"query|hits|env:none,resource:resource4,service:A3":                                               1,
 		"query|hits|env:none,resource:resource6,service:A3":                                               1,
+		"nested_op|hits|env:none,resource:resource1,service:A1":                                           1,
+		"query|errors|env:none,resource:resource1,service:A1":                                             0,
+		"query|errors|env:none,resource:resource2,service:A2":                                             0,
+		"query|errors|env:none,resource:resource3,service:A2":                                             0,
+		"query|errors|env:none,resource:resource4,service:A3":                                             0,
+		"query|errors|env:none,resource:resource6,service:A3":                                             0,
+		"nested_op|errors|env:none,resource:resource1,service:A1":                                         0,
 	}
-
 	countsEq(assert, expectedCountValByKey, receivedCounts)
 }
