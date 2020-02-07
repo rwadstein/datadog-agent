@@ -458,3 +458,84 @@ func TestConcentratorSublayersStatsCounts(t *testing.T) {
 	}
 	countsEq(assert, expectedCountValByKey, receivedCounts)
 }
+
+func TestConcentrator_AddNow(t *testing.T) {
+	assert := assert.New(t)
+	now := time.Now().UnixNano()
+
+	t.Run("only top-level root span", func(t *testing.T) {
+		statsChan := make(chan []Bucket)
+		trace := pb.Trace{
+			testSpan(1, 0, 50, 5, "query", "A1", "resource1", 0, nil),
+			testSpan(2, 1, 40, 4, "query", "A1", "resource1", 1, nil),
+		}
+		traceutil.ComputeTopLevel(trace)
+		wt := NewWeightedTrace(trace, traceutil.GetRoot(trace))
+		testTrace := &Input{
+			Env:   "none",
+			Trace: wt,
+		}
+		c := NewConcentrator([]string{}, testBucketInterval, statsChan)
+		c.addNow(testTrace, time.Now().UnixNano())
+		expected := map[string]float64{
+			"query|duration|env:none,resource:resource1,service:A1": 50,
+			"query|hits|env:none,resource:resource1,service:A1":     1,
+			"query|errors|env:none,resource:resource1,service:A1":   0,
+		}
+		// skip ahead to first possible flush
+		stats := c.flushNow(now + (int64(c.bufferLen) * testBucketInterval))
+		countsEq(assert, expected, stats[0].Counts)
+	})
+
+	t.Run("top-level root span also marked as measured", func(t *testing.T) {
+		statsChan := make(chan []Bucket)
+		trace := pb.Trace{
+			testSpan(1, 0, 50, 5, "query", "A1", "resource1", 0, measuredSpanMeta),
+			testSpan(2, 1, 40, 4, "query", "A1", "resource1", 1, nil),
+		}
+		traceutil.ComputeTopLevel(trace)
+		wt := NewWeightedTrace(trace, traceutil.GetRoot(trace))
+		testTrace := &Input{
+			Env:   "none",
+			Trace: wt,
+		}
+		c := NewConcentrator([]string{}, testBucketInterval, statsChan)
+		c.addNow(testTrace, time.Now().UnixNano())
+		expected := map[string]float64{
+			"query|duration|env:none,resource:resource1,service:A1": 50,
+			"query|hits|env:none,resource:resource1,service:A1":     1,
+			"query|errors|env:none,resource:resource1,service:A1":   0,
+		}
+		// skip ahead to first possible flush
+		stats := c.flushNow(now + (int64(c.bufferLen) * testBucketInterval))
+		countsEq(assert, expected, stats[0].Counts)
+	})
+
+	t.Run("top-level span, measured span, unmarked span", func(t *testing.T) {
+		statsChan := make(chan []Bucket)
+		trace := pb.Trace{
+			testSpan(1, 0, 50, 5, "query", "A1", "resource1", 0, nil),
+			testSpan(2, 1, 40, 4, "custom_query_op", "A1", "resource1", 1, measuredSpanMeta),
+			testSpan(3, 2, 40, 4, "nested_op", "A1", "resource1", 1, nil),
+		}
+		traceutil.ComputeTopLevel(trace)
+		wt := NewWeightedTrace(trace, traceutil.GetRoot(trace))
+		testTrace := &Input{
+			Env:   "none",
+			Trace: wt,
+		}
+		c := NewConcentrator([]string{}, testBucketInterval, statsChan)
+		c.addNow(testTrace, time.Now().UnixNano())
+		expected := map[string]float64{
+			"query|duration|env:none,resource:resource1,service:A1":           50,
+			"query|hits|env:none,resource:resource1,service:A1":               1,
+			"query|errors|env:none,resource:resource1,service:A1":             0,
+			"custom_query_op|duration|env:none,resource:resource1,service:A1": 40,
+			"custom_query_op|hits|env:none,resource:resource1,service:A1":     1,
+			"custom_query_op|errors|env:none,resource:resource1,service:A1":   1,
+		}
+		// skip ahead to first possible flush
+		stats := c.flushNow(now + (int64(c.bufferLen) * testBucketInterval))
+		countsEq(assert, expected, stats[0].Counts)
+	})
+}
