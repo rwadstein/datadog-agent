@@ -79,9 +79,10 @@ func TestConcentratorOldestTs(t *testing.T) {
 		testSpan(1, 0, 20, 2, "query", "A1", "resource1", 0, nil),
 		testSpan(1, 0, 10, 1, "query", "A1", "resource1", 0, nil),
 		testSpan(1, 0, 1, 0, "query", "A1", "resource1", 0, nil),
-		testSpan(1, 0, 500, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
-		testSpan(1, 0, 1000, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
-		testSpan(1, 0, 1500, 0, "custom_query_op", "A1", "resource1", 1, measuredSpanMeta),
+		testSpan(2, 0, 500, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
+		// these two measured spans are not top-level, but they should still get counts
+		testSpan(3, 2, 1000, 0, "nested_op", "A1", "resource1", 0, measuredSpanMeta),
+		testSpan(4, 2, 1500, 0, "nested_op", "A1", "resource1", 1, measuredSpanMeta), // error in span
 	}
 
 	traceutil.ComputeTopLevel(trace)
@@ -118,9 +119,12 @@ func TestConcentratorOldestTs(t *testing.T) {
 			"query|duration|env:none,resource:resource1,service:A1":           151,
 			"query|hits|env:none,resource:resource1,service:A1":               6,
 			"query|errors|env:none,resource:resource1,service:A1":             0,
-			"custom_query_op|duration|env:none,resource:resource1,service:A1": 3000,
-			"custom_query_op|hits|env:none,resource:resource1,service:A1":     3,
-			"custom_query_op|errors|env:none,resource:resource1,service:A1":   1,
+			"custom_query_op|duration|env:none,resource:resource1,service:A1": 500,
+			"custom_query_op|hits|env:none,resource:resource1,service:A1":     1,
+			"custom_query_op|errors|env:none,resource:resource1,service:A1":   0,
+			"nested_op|duration|env:none,resource:resource1,service:A1":       2500,
+			"nested_op|hits|env:none,resource:resource1,service:A1":           2,
+			"nested_op|errors|env:none,resource:resource1,service:A1":         1,
 		}
 		countsEq(assert, expected, stats[0].Counts)
 	})
@@ -164,9 +168,12 @@ func TestConcentratorOldestTs(t *testing.T) {
 			"query|duration|env:none,resource:resource1,service:A1":           1,
 			"query|hits|env:none,resource:resource1,service:A1":               1,
 			"query|errors|env:none,resource:resource1,service:A1":             0,
-			"custom_query_op|duration|env:none,resource:resource1,service:A1": 3000,
-			"custom_query_op|hits|env:none,resource:resource1,service:A1":     3,
-			"custom_query_op|errors|env:none,resource:resource1,service:A1":   1,
+			"custom_query_op|duration|env:none,resource:resource1,service:A1": 500,
+			"custom_query_op|hits|env:none,resource:resource1,service:A1":     1,
+			"custom_query_op|errors|env:none,resource:resource1,service:A1":   0,
+			"nested_op|duration|env:none,resource:resource1,service:A1":       2500,
+			"nested_op|hits|env:none,resource:resource1,service:A1":           2,
+			"nested_op|errors|env:none,resource:resource1,service:A1":         1,
 		}
 		countsEq(assert, expected, stats[0].Counts)
 	})
@@ -194,9 +201,10 @@ func TestConcentratorStatsTotals(t *testing.T) {
 		testSpan(1, 0, 20, 2, "query", "A1", "resource1", 0, nil),
 		testSpan(1, 0, 10, 1, "query", "A1", "resource1", 0, nil),
 		testSpan(1, 0, 1, 0, "query", "A1", "resource1", 0, nil),
-		testSpan(1, 0, 10, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
-		testSpan(1, 0, 10, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
-		testSpan(1, 0, 100, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
+		testSpan(2, 0, 10, 0, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
+		// these two measured spans are not top-level, but they should still get counts
+		testSpan(3, 2, 10, 0, "nested_op", "A1", "resource1", 0, measuredSpanMeta),
+		testSpan(4, 2, 100, 0, "nested_op", "A1", "resource1", 1, measuredSpanMeta), // error in span
 	}
 
 	traceutil.ComputeTopLevel(trace)
@@ -221,13 +229,13 @@ func TestConcentratorStatsTotals(t *testing.T) {
 		}
 
 		for key, count := range stats[0].Counts {
-			if strings.HasPrefix(key, "query|duration") || strings.HasPrefix(key, "custom_query_op|duration") {
+			if strings.Contains(key, "|duration|") {
 				duration += count.Value
 			}
-			if strings.HasPrefix(key, "query|hits") || strings.HasPrefix(key, "custom_query_op|hits") {
+			if strings.Contains(key, "|hits|") {
 				hits += count.Value
 			}
-			if strings.HasPrefix(key, "query|errors") || strings.HasPrefix(key, "custom_query_op|errors") {
+			if strings.Contains(key, "|errors|") {
 				errors += count.Value
 			}
 		}
@@ -236,7 +244,7 @@ func TestConcentratorStatsTotals(t *testing.T) {
 
 	assert.Equal(duration, float64(50+40+30+20+10+1+10+10+100), "Wrong value for total duration %d", duration)
 	assert.Equal(hits, float64(len(trace)), "Wrong value for total hits %d", hits)
-	assert.Equal(errors, float64(0), "Wrong value for total errors %d", errors)
+	assert.Equal(errors, float64(1), "Wrong value for total errors %d", errors)
 }
 
 // TestConcentratorStatsCounts tests exhaustively each stats bucket, over multiple time buckets.
