@@ -265,6 +265,7 @@ func TestConcentratorStatsCounts(t *testing.T) {
 		// more than 2 buckets old, should be added to the 2 bucket-old, first flush.
 		testSpan(1, 0, 111, 10, "query", "A1", "resource1", 0, nil),
 		testSpan(1, 0, 222, 3, "query", "A1", "resource1", 0, nil),
+		testSpan(30, 0, 150, 12, "custom_query_op", "A1", "resource1", 0, measuredSpanMeta),
 		// 2 buckets old, part of the first flush
 		testSpan(1, 0, 24, 2, "query", "A1", "resource1", 0, nil),
 		testSpan(2, 0, 12, 2, "query", "A1", "resource1", 2, nil),
@@ -286,15 +287,18 @@ func TestConcentratorStatsCounts(t *testing.T) {
 	expectedCountValByKeyByTime := make(map[int64]map[string]float64)
 	// 2-bucket old flush
 	expectedCountValByKeyByTime[alignedNow-2*testBucketInterval] = map[string]float64{
-		"query|duration|env:none,resource:resource1,service:A1":   369,
-		"query|duration|env:none,resource:resource2,service:A2":   300000000040,
-		"query|duration|env:none,resource:resourcefoo,service:A2": 30,
-		"query|hits|env:none,resource:resource1,service:A1":       4,
-		"query|hits|env:none,resource:resource2,service:A2":       2,
-		"query|hits|env:none,resource:resourcefoo,service:A2":     1,
-		"query|errors|env:none,resource:resource1,service:A1":     1,
-		"query|errors|env:none,resource:resource2,service:A2":     2,
-		"query|errors|env:none,resource:resourcefoo,service:A2":   0,
+		"query|duration|env:none,resource:resource1,service:A1":           369,
+		"query|duration|env:none,resource:resource2,service:A2":           300000000040,
+		"query|duration|env:none,resource:resourcefoo,service:A2":         30,
+		"custom_query_op|duration|env:none,resource:resource1,service:A1": 150,
+		"query|hits|env:none,resource:resource1,service:A1":               4,
+		"query|hits|env:none,resource:resource2,service:A2":               2,
+		"query|hits|env:none,resource:resourcefoo,service:A2":             1,
+		"custom_query_op|hits|env:none,resource:resource1,service:A1":     1,
+		"query|errors|env:none,resource:resource1,service:A1":             1,
+		"query|errors|env:none,resource:resource2,service:A2":             2,
+		"query|errors|env:none,resource:resourcefoo,service:A2":           0,
+		"custom_query_op|errors|env:none,resource:resource1,service:A1":   0,
 	}
 	// 1-bucket old flush
 	expectedCountValByKeyByTime[alignedNow-1*testBucketInterval] = map[string]float64{
@@ -385,14 +389,16 @@ func TestConcentratorSublayersStatsCounts(t *testing.T) {
 
 	trace := pb.Trace{
 		// first bucket
+		// most of these are top-level spans, except otherwise noted
 		testSpan(1, 0, 2000, 0, "query", "A1", "resource1", 0, nil),
 		testSpan(2, 1, 1000, 0, "query", "A2", "resource2", 0, nil),
 		testSpan(3, 1, 1000, 0, "query", "A2", "resource3", 0, nil),
 		testSpan(4, 2, 40, 0, "query", "A3", "resource4", 0, nil),
-		testSpan(5, 4, 300, 0, "query", "A3", "resource5", 0, nil),
+		// measured, not top-level - should get counts and will add to the fourth span's sublayer metrics
+		testSpan(5, 4, 300, 0, "query", "A3", "resource5", 0, measuredSpanMeta),
+		testSpan(7, 5, 150, 0, "query", "A3", "resource7", 0, nil),
 		testSpan(6, 2, 30, 0, "query", "A3", "resource6", 0, nil),
-		// add a measured span as a child of the first span
-		// this will add to the sublayer metrics for service:A1, resource:resource1, type:db
+		// measured, not top-level - should get counts and will add to the first span's sublayer metrics
 		testSpan(10, 1, 200, 2020, "nested_op", "A1", "resource1", 0, measuredSpanMeta),
 	}
 	traceutil.ComputeTopLevel(trace)
@@ -427,32 +433,35 @@ func TestConcentratorSublayersStatsCounts(t *testing.T) {
 	expectedCountValByKey := map[string]float64{
 		"query|_sublayers.duration.by_service|env:none,resource:resource1,service:A1,sublayer_service:A1": 2200,
 		"query|_sublayers.duration.by_service|env:none,resource:resource1,service:A1,sublayer_service:A2": 2000,
-		"query|_sublayers.duration.by_service|env:none,resource:resource1,service:A1,sublayer_service:A3": 370,
-		"query|_sublayers.duration.by_service|env:none,resource:resource4,service:A3,sublayer_service:A3": 340,
+		"query|_sublayers.duration.by_service|env:none,resource:resource1,service:A1,sublayer_service:A3": 520,
+		"query|_sublayers.duration.by_service|env:none,resource:resource4,service:A3,sublayer_service:A3": 490,
 		"query|_sublayers.duration.by_service|env:none,resource:resource2,service:A2,sublayer_service:A2": 1000,
-		"query|_sublayers.duration.by_service|env:none,resource:resource2,service:A2,sublayer_service:A3": 370,
-		"query|_sublayers.duration.by_type|env:none,resource:resource1,service:A1,sublayer_type:db":       4570,
-		"query|_sublayers.duration.by_type|env:none,resource:resource2,service:A2,sublayer_type:db":       1370,
-		"query|_sublayers.duration.by_type|env:none,resource:resource4,service:A3,sublayer_type:db":       340,
-		"query|_sublayers.span_count|env:none,resource:resource1,service:A1,:":                            7,
-		"query|_sublayers.span_count|env:none,resource:resource2,service:A2,:":                            4,
-		"query|_sublayers.span_count|env:none,resource:resource4,service:A3,:":                            2,
+		"query|_sublayers.duration.by_service|env:none,resource:resource2,service:A2,sublayer_service:A3": 520,
+		"query|_sublayers.duration.by_type|env:none,resource:resource1,service:A1,sublayer_type:db":       4720,
+		"query|_sublayers.duration.by_type|env:none,resource:resource2,service:A2,sublayer_type:db":       1520,
+		"query|_sublayers.duration.by_type|env:none,resource:resource4,service:A3,sublayer_type:db":       490,
+		"query|_sublayers.span_count|env:none,resource:resource1,service:A1,:":                            8,
+		"query|_sublayers.span_count|env:none,resource:resource2,service:A2,:":                            5,
+		"query|_sublayers.span_count|env:none,resource:resource4,service:A3,:":                            3,
 		"query|duration|env:none,resource:resource1,service:A1":                                           2000,
 		"query|duration|env:none,resource:resource2,service:A2":                                           1000,
 		"query|duration|env:none,resource:resource3,service:A2":                                           1000,
 		"query|duration|env:none,resource:resource4,service:A3":                                           40,
+		"query|duration|env:none,resource:resource5,service:A3":                                           300,
 		"query|duration|env:none,resource:resource6,service:A3":                                           30,
 		"nested_op|duration|env:none,resource:resource1,service:A1":                                       200,
 		"query|hits|env:none,resource:resource1,service:A1":                                               1,
 		"query|hits|env:none,resource:resource2,service:A2":                                               1,
 		"query|hits|env:none,resource:resource3,service:A2":                                               1,
 		"query|hits|env:none,resource:resource4,service:A3":                                               1,
+		"query|hits|env:none,resource:resource5,service:A3":                                               1,
 		"query|hits|env:none,resource:resource6,service:A3":                                               1,
 		"nested_op|hits|env:none,resource:resource1,service:A1":                                           1,
 		"query|errors|env:none,resource:resource1,service:A1":                                             0,
 		"query|errors|env:none,resource:resource2,service:A2":                                             0,
 		"query|errors|env:none,resource:resource3,service:A2":                                             0,
 		"query|errors|env:none,resource:resource4,service:A3":                                             0,
+		"query|errors|env:none,resource:resource5,service:A3":                                             0,
 		"query|errors|env:none,resource:resource6,service:A3":                                             0,
 		"nested_op|errors|env:none,resource:resource1,service:A1":                                         0,
 	}
