@@ -392,7 +392,8 @@ func TestConcentratorSublayersStatsCounts(t *testing.T) {
 		// most of these are top-level spans, except otherwise noted
 		testSpan(1, 0, 2000, 0, "query", "A1", "resource1", 0, nil),
 		testSpan(2, 1, 1000, 0, "query", "A2", "resource2", 0, nil),
-		testSpan(3, 1, 1000, 0, "query", "A2", "resource3", 0, nil),
+		// measured and top-level, but count and sublayer calculation should stay the same
+		testSpan(3, 1, 1000, 0, "query", "A2", "resource3", 0, measuredSpanMeta),
 		testSpan(4, 2, 40, 0, "query", "A3", "resource4", 0, nil),
 		// measured, not top-level - should get counts and will add to the fourth span's sublayer metrics
 		testSpan(5, 4, 300, 0, "query", "A3", "resource5", 0, measuredSpanMeta),
