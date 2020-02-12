@@ -180,6 +180,9 @@ func TestIsMeasured(t *testing.T) {
 	span.Meta = map[string]string{"_dd.measured": "1"}
 	assert.True(IsMeasured(span), "the measured key is present, the span should be measured")
 
+	span.Meta = map[string]string{"_dd.measured": "0"}
+	assert.False(IsMeasured(span), "the measured key is present but the value != 1, the span should not be measured")
+
 	span.Meta = map[string]string{"env": "dev"}
 	assert.False(IsMeasured(span), "the meta is not empty but it does not contain the measured key either")
 }
