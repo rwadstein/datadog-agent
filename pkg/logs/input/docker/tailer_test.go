@@ -143,7 +143,6 @@ func TestTailer_readForever(t *testing.T) {
 	tests := []struct {
 		name      string
 		newTailer func() *Tailer
-		newReader reader
 		wantFunc  func(tailer *Tailer) error
 	}{
 		{

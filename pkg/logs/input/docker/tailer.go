@@ -37,7 +37,7 @@ type Tailer struct {
 	ContainerID string
 	outputChan  chan *message.Message
 	decoder     *decoder.Decoder
-	reader      reader
+	reader      *safeReader
 	cli         *client.Client
 	source      *config.LogSource
 	tagProvider tag.Provider
