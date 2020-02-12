@@ -290,7 +290,7 @@ func (l *Launcher) restartTailer(containerID string) {
 		if l.collectAllSource != nil {
 			l.collectAllSource.RemoveInput(containerID)
 		}
-		go oldTailer.Stop()
+		oldTailer.Stop()
 		l.removeTailer(containerID)
 	}
 
@@ -304,7 +304,7 @@ func (l *Launcher) restartTailer(containerID string) {
 	tailer := NewTailer(cli, containerID, source, l.pipelineProvider.NextPipelineChan(), l.erroredContainerID)
 
 	// compute the offset to prevent from missing or duplicating logs
-	since, err := Since(l.registry, tailer.Identifier(), service.After)
+	since, err := Since(l.registry, tailer.Identifier(), service.Before)
 	if err != nil {
 		log.Warnf("Could not recover last committed offset for container %v: %v", ShortContainerID(containerID), err)
 	}
